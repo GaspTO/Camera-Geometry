@@ -1,4 +1,4 @@
-# Projective Geometry Utilities (Python)
+# Camera Geometry (Python)
 
 Small, focused utilities for projective geometry in homogeneous coordinates: points, hyperplanes, projective spaces, linear transformations, and homographies — with helpers to find intersections via null spaces.
 
