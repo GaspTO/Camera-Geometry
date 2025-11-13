@@ -1,260 +1,365 @@
 from __future__ import annotations
 import numpy as np
 from scipy.linalg import null_space
-from typing import List, Union
+from typing import Tuple, Iterable
+from .space import Space, Transformation, Element
 
 
-def check_vector(vec: np.ndarray, name: str):
-    if not isinstance(vec, np.ndarray):
-        raise TypeError(f"vec should be of type np.ndarray but is of type {type(vec)}")
-    if len(vec.shape) != 1:
-        raise ValueError(f"The vector should only have one dimension")
-    if np.count_nonzero(vec) == 0:
-        raise ValueError(f"{name} can not be 0")
+class ProjectiveSpace(Space):
+    """Projective space P^n (over R in this project)."""
+
+    _cache: dict[int, "ProjectiveSpace"] = {}
+
+    def __new__(cls, dim: int):
+        if not isinstance(dim, int) or dim < 0:
+            raise ValueError("dim must be a non-negative int")
+        inst = cls._cache.get(dim)
+        if inst is not None:
+            return inst
+        inst = super().__new__(cls)
+        cls._cache[dim] = inst
+        return inst
+
+    def __init__(self, dim: int):
+        # idempotent init (since __init__ runs even when returning a cached instance)
+        if getattr(self, "_init_done", False):
+            return
+        self._dim = dim
+        self._init_done = True
+
+    @property
+    def dim(self) -> int:
+        return self._dim
+
+    def __repr__(self) -> str:
+        return f"P^{self._dim}"
+
+
+class ProjectivePoint(Element):
+    """
+    A point in P^n represented by a nonzero homogeneous vector h ∈ R^{n+1},
+    defined up to nonzero scalar multiples.
+    """       
+    def __init__(self, hvec: np.ndarray):
+        h = np.asarray(hvec, dtype=float)
+        if h.ndim != 1:
+            raise ValueError("homogeneous vector must be 1D")
+        if h.size == 0 or np.allclose(h, 0):
+            raise ValueError("homogeneous vector must be nonzero")
+        self._h = h
+        super().__init__(ProjectiveSpace(h.size - 1))  # internal tag for compatibility
+
+    # Accessors
+    @property
+    def h(self) -> np.ndarray:
+        """Stored homogeneous representative (n+1,)."""
+        return self._h
     
-
-class Point:
-    def __init__(self, vec: np.ndarray):
-        check_vector(vec, "vec")
-        self._vec = vec/np.linalg.norm(vec) # Store unit vector
-        self._dim = vec.shape[0] - 1
-        
-    def vec(self):
-        assert abs(np.linalg.norm(self._vec) - 1) < 0.001
-        return self._vec
+    def h_unit(self) -> np.ndarray:
+        """Representative scaled to ||h|| == 1."""
+        nrm = np.linalg.norm(self._h)
+        if nrm == 0:
+            raise ValueError("cannot normalize zero vector")
+        return self._h / nrm
+    
+    def h_coord(self, i: int = -1, *, atol: float = 1e-12) -> np.ndarray:
+        """
+        Return a homogeneous rep scaled so h[i] == 1 (default: last coord).
+        Raises if h[i] ≈ 0.
+        """
+        idx = i if i >= 0 else (self._h.size - 1)
+        den = self._h[idx]
+        if np.isclose(den, 0.0, atol=atol):
+            raise ValueError(f"h[{idx}] ≈ 0; not in this chart")
+        return self._h / den
        
-    def dim(self):
+    @property
+    def dim(self) -> int:
+        return self.space.dim
+    
+    def equals_up_to_scale(self, other: "ProjectivePoint", *, tol: float = 1e-12) -> bool:
+        if not isinstance(other, ProjectivePoint) or other.space is not self.space:
+            return False
+        a, b = self.h, other.h
+        denom = float(np.dot(b, b))  
+        if denom == 0.0:
+            return False
+        s = float(np.dot(a, b))/ denom        # scale that best matches a ≈ s b
+        return np.allclose(a, s * b, atol=tol, rtol=0.0)
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, ProjectivePoint) and self.equals_up_to_scale(other)
+    
+    def __repr__(self) -> str:
+        return f"ProjectivePoint(h={self._h!r}, space=P^{self.space.dim})"
+    
+    
+class ProjectiveTransformation(Transformation):
+    """
+    Projective linear map P^n -> P^m induced by an (m+1) x (n+1) matrix A,
+    acting on homogeneous reps via [x] ↦ [A x]. Requires full column rank.
+    """
+    def __init__(self, A: np.ndarray):
+        if not isinstance(A, np.ndarray) or A.ndim != 2:
+            raise ValueError("A must be a 2D numpy array")
+        m1, n1 = A.shape  # (m+1, n+1)
+        if m1 <= 0 or n1 <= 0:
+            raise ValueError("A must have shape (m+1, n+1) with m,n >= 0")
+        if np.linalg.matrix_rank(A) != n1:
+            raise ValueError("A must have full column rank (rank = n+1)")
+        
+        self._A = A
+        self._m = m1 - 1  # codomain: P^m
+        self._n = n1 - 1  # domain:   P^n
+        super().__init__(ProjectiveSpace(self._n), ProjectiveSpace(self._m))
+        
+    @property
+    def mat(self) -> np.ndarray:
+        return self._A
+
+    @property
+    def dim(self) -> Tuple[int, int]:
+        """(m, n) meaning P^n -> P^m."""
+        return (self._m, self._n)
+        
+    def __call__(self, p: ProjectivePoint) -> ProjectivePoint:
+        self.check_compatible(p)
+        x = p.h
+        y = self._A @ x
+        if np.allclose(y, 0):
+            raise ValueError("A @ p.h is (numerically) zero; map undefined at this point")
+        return ProjectivePoint(y) 
+    
+    def __str__(self):
+        return str(self._A)
+    
+    def __repr__(self) -> str:
+        return f"ProjMap(P^{self._n} -> P^{self._m})"
+    
+    
+class DualProjectiveSpace(Space):
+    """Dual projective space (hyperplanes) of P^n (over R in this project)."""
+
+    _cache: dict[int, "DualProjectiveSpace"] = {}
+
+    def __new__(cls, dim: int):
+        if not isinstance(dim, int) or dim < 0:
+            raise ValueError("dim must be a non-negative int")
+        inst = cls._cache.get(dim)
+        if inst is not None:
+            return inst
+        inst = super().__new__(cls)
+        cls._cache[dim] = inst
+        return inst
+
+    def __init__(self, dim: int):
+        # idempotent init (since __init__ runs even when returning a cached instance)
+        if getattr(self, "_init_done", False):
+            return
+        self._dim = dim
+        self._init_done = True
+
+    @property
+    def dim(self) -> int:
         return self._dim
+
+    def __repr__(self) -> str:
+        return f"(P^{self._dim})*"
     
-    def contained(self, hyperplane: Hyperplane):
-        if not isinstance(hyperplane, Hyperplane):
-            raise ValueError("point needs to be of type Point")
-        if hyperplane.dim() != self.dim():
-            raise ValueError(f"point needs to be of dim {self.dim()}")
     
-    @staticmethod
-    def find_point(planes: List[Hyperplane]):
-        Pi = np.array([pi.vec() for pi in planes]) # each point is a row
-        N = null_space(Pi)
-        if N.shape[1] != 1:
-            raise RuntimeError("Expected a unique intersection (nullity ≠ 1).")
-        assert abs(1 - np.linalg.norm(N)) < 0.0001
-        x = N[:, 0]
-        return Point(x)
-       
-    def __eq__(self, other):
-        if isinstance(other,Point):
-            return np.array_equal(self.vec(),other.vec())
+class ProjectiveHyperplane(Element):
+    """
+    A hyperplane in P^n given by a nonzero covector a ∈ (R^{n+1})*,
+    defined up to nonzero scalar multiples.
+    Incidence: point [h] lies on [a] iff a^T h = 0.
+    """
+    def __init__(self, avec: np.ndarray):
+        a = np.asarray(avec, dtype=float)
+        if a.ndim != 1:
+            raise ValueError("covector must be 1D")
+        if a.size == 0 or np.allclose(a, 0):
+            raise ValueError("covector must be nonzero")
+        self._a = a
+        # dual space of P^n, n = a.size - 1
+        super().__init__(DualProjectiveSpace(a.size - 1))
+
+    # Accessors
+    @property
+    def a(self) -> np.ndarray:
+        """Stored covector representative (n+1,)."""
+        return self._a
+
+    def a_unit(self) -> np.ndarray:
+        """Representative scaled to ||a|| == 1."""
+        nrm = np.linalg.norm(self._a)
+        if nrm == 0:
+            raise ValueError("cannot normalize zero covector")
+        return self._a / nrm
+
+    def a_coord(self, i: int = -1, *, atol: float = 1e-12) -> np.ndarray:
+        """
+        Return a covector rep scaled so a[i] == 1 (default: last coord).
+        Raises if a[i] ≈ 0.
+        """
+        idx = i if i >= 0 else (self._a.size - 1)
+        den = self._a[idx]
+        if np.isclose(den, 0.0, atol=atol):
+            raise ValueError(f"a[{idx}] ≈ 0; cannot use this coordinate for normalization")
+        return self._a / den
+
+    @property
+    def dim(self) -> int:
+        # hyperplanes live in the dual of P^n
+        return self.space.dim
+
+    def equals_up_to_scale(self, other: "ProjectiveHyperplane", *, tol: float = 1e-12) -> bool:
+        if not isinstance(other, ProjectiveHyperplane) or other.space is not self.space:
+            return False
+        a, b = self.a, other.a
+        denom = float(np.dot(b, b))
+        if denom == 0.0:
+            return False
+        s = float(np.dot(a, b)) / denom  # scale that best matches a ≈ s b
+        return np.allclose(a, s * b, atol=tol, rtol=0.0)
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, ProjectiveHyperplane) and self.equals_up_to_scale(other)
+
+    def __repr__(self) -> str:
+        return f"ProjectiveHyperplane(a={self._a!r}, space=(P^{self.space.dim})*)"
+
+
+# ----- Operations ----- #
+def incidence(p: ProjectivePoint, H: ProjectiveHyperplane, *, tol: float = 1e-12) -> bool:
+    """
+    Return True iff the projective point p lies on the hyperplane H,
+    i.e. a^T h ≈ 0.
+
+    p: ProjectivePoint in P^n
+    H: ProjectiveHyperplane in (P^n)*
+    """
+    if not isinstance(p, ProjectivePoint):
+        raise TypeError("p must be a ProjectivePoint")
+    if not isinstance(H, ProjectiveHyperplane):
+        raise TypeError("H must be a ProjectiveHyperplane")
+
+    if p.dim != H.dim:
+        # They live in different ambient dimensions, so incidence makes no sense
         return False
-    
-    def __str__(self):
-        return str(self._vec)
-    
-    
-class Hyperplane:
-    def __init__(self, vec:np.ndarray):
-        check_vector(vec, "vec")
-        self._vec = vec/np.linalg.norm(vec) # Store unit vector
-        self._dim = vec.shape[0] - 1
-        
-    def vec(self):
-        assert abs(np.linalg.norm(self._vec) - 1) < 0.001
-        return self._vec
-    
-    def dim(self):
-        return self._dim
-    
-    def contains(self, point: Point):
-        if not isinstance(point, Point):
-            raise ValueError("point needs to be of type Point")
-        if point.dim() != self.dim():
-            raise ValueError(f"point needs to be of dim {self.dim()}")
-        
-        return abs(np.dot(self.vec(),point.vec())) < 1e-6
-    
-    @staticmethod
-    def find_plane(points: list["Point"]) -> "Hyperplane":
-        X = np.array([p.vec() for p in points])           # rows = points
-        N = null_space(X)                                 # π satisfies X @ π = 0
-        if N.shape[1] != 1:
-            raise RuntimeError("Expected a unique plane (nullity ≠ 1).")
-        π = N[:, 0]
-        return Hyperplane(π)
-                
-    def __eq__(self, other):
-        if isinstance(other,Hyperplane):
-            return np.array_equal(self.vec(),other.vec())
-        return False
-    
-    def __str__(self):
-        return str(self._vec)
-        
-    
-class ProjectiveSpace:
-    def __init__(self, dim: int=None, infty_hyperplane: Hyperplane=None):
-        if dim is not None and infty_hyperplane is not None:
-            raise ValueError("Do not specify the dimension if the infinity hyperplane is passed as argument")  
-        if dim is None and infty_hyperplane is None:
-            raise ValueError("Either specify the dimension of the projective space of the hyperplane at infinity")
-    
-        if dim:
-            arr = np.zeros(dim+1)
-            arr[-1] = 1
-            self._infty_hyperplane = Hyperplane(arr)    # canonical hyperplane (0,0,...,1)
-            self._dim = dim
-        else:
-            self._infty_hyperplane = infty_hyperplane
-            self._dim = infty_hyperplane.dim() 
-          
-    def dim(self):
-        return self._dim
-    
-    def dehomogenize(self, point: Point):
-        if point.dim() != self.dim():
-            raise ValueError("Point is of a different dimension than the projective space")
-        x = point.vec()
-        pi = self._infty_hyperplane.vec()
-        dehomogenized_x = x / np.dot(pi,x)
-        assert abs(np.dot(dehomogenized_x,pi) - 1.0) < 0.001
-        return dehomogenized_x
-         
-    def is_ideal_point(self, point: Point):
-        if not isinstance(point, Point):
-            raise ValueError("point needs to be of type Point")
-        if point.dim() != self.dim():
-            raise ValueError(f"point needs to be of dim {self.dim()}")
-        return self._infty_hyperplane.contains(point)
-    
-class Transformation:
-    def __init__(self, matrix: np.ndarray):
-        if len(matrix.shape) != 2:
-            raise ValueError("Matrix shape is not (x,y)")
-        self._dim_out, self._dim_in = matrix.shape[0]-1, matrix.shape[1]-1
-        if not np.isclose(matrix[-1][-1],0.0):
-            self._matrix = matrix / matrix[-1][-1] # normalize such that the last element is a 1
-        
-    def dim(self):
-        return self._dim_out, self._dim_in
-    
-    def mat(self):
-        return self._matrix 
-        
-    def __call__(self, x: Union[Point, Hyperplane]):
-        """ It outputs in the same shape as the input"""
-        if not isinstance(x, Point):
-            raise ValueError("Point is expected")
-                
-        if x.dim() != self._dim_in:
-            raise ValueError("Point dimension is incompatible with matrix")
-        y = self._matrix @ x.vec()
-        return Point(y)  
 
-    def is_singular(self):
-        return np.linalg.matrix_rank(self._matrix).item() != self._matrix.shape[0]
-    
-    def __str__(self):
-        return str(self._matrix)
-    
-    
-class Composition(Transformation):
-    def __init__(self, t1: Transformation, t2: Transformation):
-        if t1.dim()[1] != t2.dim()[0]:
-            raise ValueError("The transformations matrix have incompatible dimensions")
-        t3_mat = t1.mat() @ t2.mat()
-        super().__init__(t3_mat)
-        
-        
-class Homography(Transformation):
-    def __init__(self, matrix: np.ndarray):
-        super().__init__(matrix=matrix)
-        if matrix.shape[0] != matrix.shape[1]:
-            raise ValueError("An homography matrix is expected to be square")
-        if np.linalg.matrix_rank(matrix.astype(float)) != matrix.shape[0]:
-            raise ValueError("An homography is expected to be non singular")
-    
-    def get_fixed_points(self):
-        _, V = np.linalg.eig(self._matrix)
-        points = []
-        for i in range(V.shape[1]):
-            points.append(Point(V[:,i]))
-        return points
-    
-    def is_affinity(self):
-        return np.all(self._matrix[-1, :-1] == 0) and (self._matrix[-1, -1] != 0) and self._dim_in == self._dim_out
-   
-    def get_inverse(self):
-        return Homography(np.linalg.inv(self._matrix))
+    a = H.a   # (n+1,)
+    h = p.h   # (n+1,)
+
+    val = float(np.dot(a, h))
+    return np.isclose(val, 0.0, atol=tol, rtol=0.0)
 
 
-if __name__ == "__main__":
-    ## Points
-    p1 = Point(np.array([1,2,3,1]))
-    p2 = Point(np.array([2,4,6,2]))
-    p3 = Point(np.array([1,2,2,1]))
-    p4 = np.array([1,2,3,1])
-    assert p1 == p2
-    assert not (p2 == p3)
-    assert not (p3 == p4)
-    print("Points success")
+def meet_unique(hyperplanes: Iterable[ProjectiveHyperplane], *, tol: float = 1e-12) -> ProjectivePoint:
+    """
+    Intersection point of hyperplanes in general position in P^n.
+
+    We stack the covectors aᵢ as rows of a matrix A and compute its nullspace.
+    If the nullspace is 1-dimensional (up to scale), we return the corresponding
+    ProjectivePoint. Otherwise we raise.
+    """
+    hypers = list(hyperplanes)
+    if not hypers:
+        raise ValueError("meet_unique requires at least one hyperplane")
+
+    dim0 = hypers[0].dim
+    for H in hypers[1:]:
+        if H.dim != dim0:
+            raise ValueError("all hyperplanes must have the same dimension")
+
+    A = np.stack([H.a for H in hypers], axis=0)  # shape (k, n+1)
+
+    # SciPy nullspace: returns (n+1, r) where r is nullity
+    N = null_space(A, rcond=tol)
+    if N.size == 0 or N.shape[1] != 1:
+        raise RuntimeError(
+            f"Expected a unique intersection (nullity = 1), got nullity = {N.shape[1] if N.size else 0}"
+        )
+
+    x = N[:, 0]  # (n+1,)
+    return ProjectivePoint(x)
+
+
+def join_hyperplane(points: Iterable[ProjectivePoint], *, tol: float = 1e-12) -> ProjectiveHyperplane:
+    """
+    Hyperplane through a set of points in general position in P^n.
+
+    We stack the homogeneous reps hᵢ as rows of a matrix P and compute the
+    nullspace of P. A covector a in that nullspace satisfies P a = 0, i.e.
+    aᵀ hᵢ = 0 for all i, so [a] is the hyperplane containing all the points.
+    If the nullspace is 1-dimensional (up to scale), we return that hyperplane.
+    Otherwise we raise.
+    """
+    pts = list(points)
+    if not pts:
+        raise ValueError("join_hyperplane requires at least one point")
+
+    dim0 = pts[0].dim
+    for p in pts[1:]:
+        if p.dim != dim0:
+            raise ValueError("all points must lie in the same projective space")
+
+    P = np.stack([p.h for p in pts], axis=0)  # shape (k, n+1)
+
+    N = null_space(P, rcond=tol)
+    if N.size == 0 or N.shape[1] != 1:
+        raise RuntimeError(
+            f"Expected a unique hyperplane (nullity = 1), got nullity = {N.shape[1] if N.size else 0}"
+        )
+
+    a = N[:, 0]  # (n+1,)
+    return ProjectiveHyperplane(a)
+
+
+
+def dehomogenize(
+    p: ProjectivePoint,
+    infinity_plane: "ProjectiveHyperplane | None" = None,
+    *,
+    tol: float = 1e-12,
+) -> np.ndarray:
+    """
+    Dehomogenize a projective point with respect to a chosen hyperplane at infinity.
+
+    Given:
+        - p: a ProjectivePoint in P^n
+        - infinity_plane: a ProjectiveHyperplane H = [a], default is the canonical
+          infinity plane x_n = 0 (covector e_n)
+
+    Returns:
+        A homogeneous vector x' with the same direction as p.h such that
+        a^T x' = 1, where a is the covector of the infinity plane.
+
+    Raises:
+        TypeError / ValueError if types or dimensions mismatch, or if the point
+        lies (numerically) on the infinity plane (a^T h ≈ 0).
+    """
+    if not isinstance(p, ProjectivePoint):
+        raise TypeError("p must be a ProjectivePoint")
+
+    n = p.dim  # P^n
+
+    if infinity_plane is None:
+        # canonical infinity hyperplane: x_n = 0  → a = e_n
+        a = np.zeros(n + 1, dtype=float)
+        a[-1] = 1.0
+    else:
+        if not isinstance(infinity_plane, ProjectiveHyperplane):
+            raise TypeError("infinity_plane must be a ProjectiveHyperplane or None")
+        if infinity_plane.dim != n:
+            raise ValueError("point and infinity_plane must have the same dimension")
+        a = infinity_plane.a
+
+    h = p.h
+    denom = float(np.dot(a, h))
+    if np.isclose(denom, 0.0, atol=tol, rtol=0.0):
+        raise ValueError("point lies (numerically) on the infinity plane; cannot dehomogenize")
+
+    x_prime = h / denom
     
-   
-    ## Hyperplane
-    p1 = Point(np.array([1,2,3,1]))
-    p2 = Point(np.array([2,4,6,1]))
-    p3 = Point(np.array([1,2,2.,1]))
-    pi = Hyperplane.find_plane([p1,p2,p3])
-    
-    p3 = Point(np.array([2,4,6.,1]))
-    try:
-        pi = Hyperplane.find_plane([p1,p2,p3])
-    except Exception as e:
-        print("ok")
-    
-    ## Projective Space
-    X = Point(np.array([1,2,3,1]))
-    
-    plane = Hyperplane(np.array([1,2,3,1]))    
-    space = ProjectiveSpace(infty_hyperplane=plane)
-    deh_x = space.dehomogenize(X)
-    assert abs(np.dot(deh_x,plane.vec()) - 1.0) < 0.001
-    print("Projective space success")
-    
-    plane = Hyperplane(np.array([0,0,0,1]))
-    canonical_space = ProjectiveSpace(infty_hyperplane=plane)
-    deh_x = canonical_space.dehomogenize(X)
-    assert abs(np.dot(deh_x,plane.vec()) - 1.0) < 0.001
-    assert canonical_space.is_ideal_point(Point(np.array([2,3,2,0])))
-    
-    
-    ## Transformations
-    t1 = Transformation(
-        np.array([
-            [2., 0., 0., 0.],
-            [0., 3., 0., 0.],
-            [0., 0., 4., 0.],
-            [1., 2., 3., 1.]
-        ])
-    )
-    assert t1.dim() == (4,4)
-    
-    t2 = Transformation(
-        np.array([
-            [1., 0., 0.],
-            [4., 3., 0.],
-            [5., 0., 0.],
-            [1., 2., 1.]
-        ])
-    )
-    assert t2.dim() == (4,3)
-    
-    t3 = Composition(t1,t2)
-    assert t3.dim() == (4,3)
-    assert abs(t3.mat() - np.array([
-                        [2., 0., 0.],
-                        [12., 9., 0.],
-                        [20., 0., 0.],
-                        [25., 8., 1.]
-                    ])).sum() < 0.001
-    homography = Homography(t1.mat())
-    for e in homography.get_fixed_points():
-        print(e)
+    assert abs(float(np.dot(a, x_prime)) - 1.0) <= 10 * tol
+    return x_prime

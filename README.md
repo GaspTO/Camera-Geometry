@@ -2,6 +2,9 @@
 
 Small, focused utilities for projective geometry in homogeneous coordinates: points, hyperplanes, projective spaces, linear transformations, and homographies — with helpers to find intersections via null spaces.
 
+This library is for educational purposes only. It details part of my journey in learning these concepts.
+
+
 ## Installation
 This project targets Python **3.9+** (recommended) with **NumPy** and **SciPy**.
 
