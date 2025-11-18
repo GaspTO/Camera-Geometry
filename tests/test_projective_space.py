@@ -10,7 +10,7 @@ from camera_geometry.projective_space import *
 def test_projective_space_singleton():
     a = ProjectiveSpace(2)
     b = ProjectiveSpace(2)
-    c = ProjectiveSpace(3)
+    c = ProjectiveSpace(3)  
     assert a is b
     assert a is not c
     assert a.dim == 2 and c.dim == 3

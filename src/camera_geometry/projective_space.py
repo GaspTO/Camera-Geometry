@@ -136,7 +136,33 @@ class ProjectiveTransformation(Transformation):
     def __repr__(self) -> str:
         return f"ProjMap(P^{self._n} -> P^{self._m})"
     
-    
+
+class Homography(ProjectiveTransformation):
+    """
+    A homography on P^n induced by an invertible (n+1)x(n+1) matrix.
+    """
+    def __init__(self, H: np.ndarray):
+        # Basic validation
+        if not isinstance(H, np.ndarray) or H.ndim != 2:
+            raise ValueError("H must be a 2D numpy array")
+
+        n1, n2 = H.shape
+        if n1 != n2:
+            raise ValueError("Homography matrix must be square (n+1)x(n+1)")
+        if np.linalg.matrix_rank(H) != n1:
+            raise ValueError("Homography matrix must be invertible")
+
+        # Call parent constructor (validates column rank etc.)
+        super().__init__(H)
+
+    def inverse(self) -> "Homography":
+        """Return the inverse homography."""
+        return Homography(np.linalg.inv(self._A))
+
+    def __repr__(self):
+        return f"Homography(P^{self.domain_space.dim})"
+
+
 class DualProjectiveSpace(Space):
     """Dual projective space (hyperplanes) of P^n (over R in this project)."""
 
@@ -315,7 +341,6 @@ def join_hyperplane(points: Iterable[ProjectivePoint], *, tol: float = 1e-12) ->
     return ProjectiveHyperplane(a)
 
 
-
 def dehomogenize(
     p: ProjectivePoint,
     infinity_plane: "ProjectiveHyperplane | None" = None,
@@ -363,3 +388,37 @@ def dehomogenize(
     
     assert abs(float(np.dot(a, x_prime)) - 1.0) <= 10 * tol
     return x_prime
+
+
+def is_ideal(
+    p: ProjectivePoint,
+    infinity_plane: "ProjectiveHyperplane | None" = None,
+    *,
+    tol: float = 1e-12,
+) -> bool:
+    """
+    Return True iff p is an ideal point with respect to the chosen infinity plane.
+
+    - If infinity_plane is None, we use the canonical infinity plane x_n = 0
+      (covector e_n) in P^n.
+    - Otherwise, we use the given ProjectiveHyperplane H = [a] and test a^T h ≈ 0.
+    """
+    if not isinstance(p, ProjectivePoint):
+        raise TypeError("p must be a ProjectivePoint")
+
+    n = p.dim
+
+    if infinity_plane is None:
+        # canonical infinity hyperplane: x_n = 0 → a = e_n
+        a = np.zeros(n + 1, dtype=float)
+        a[-1] = 1.0
+    else:
+        if not isinstance(infinity_plane, ProjectiveHyperplane):
+            raise TypeError("infinity_plane must be a ProjectiveHyperplane or None")
+        if infinity_plane.dim != n:
+            raise ValueError("point and infinity_plane must have the same dimension")
+        a = infinity_plane.a
+
+    h = p.h
+    val = float(np.dot(a, h))
+    return np.isclose(val, 0.0, atol=tol, rtol=0.0)
