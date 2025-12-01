@@ -7,15 +7,20 @@ class Space(ABC):
    
 
 class Element(ABC):
-    def __init__(self, space: Space):
+    def __init__(self, space: Space, content: object = None):
         if not isinstance(space, Space):
             raise ValueError("space is expected to be a Space")
         self.space = space
+        self._content = content
         
+    @property
+    def content(self) -> object:
+        return self._content
+    
     def __repr__(self):
         return f"Element(space={id(self.space)})"
     
-    
+        
 class Transformation(ABC):
     def __init__(self, domain_space: Space, codomain_space: Space):
         if not isinstance(domain_space, Space) or not isinstance(codomain_space, Space):
@@ -47,3 +52,10 @@ class Composition(Transformation):
         z = self.t1(y)
         assert self.codomain_space.contains(z), "Output not in codomain"
         return z
+        
+    def __str__(self):
+        return f"({str(self.t1)})\n∘\n({str(self.t2)})"
+    
+    def __repr__(self):
+        return f"Composition({repr(self.t1)}, {repr(self.t2)})"
+    

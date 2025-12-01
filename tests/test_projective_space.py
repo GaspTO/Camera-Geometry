@@ -83,13 +83,13 @@ def test_projective_transformation_rectangular_m_ge_n():
     y = T(x)
     np.testing.assert_allclose(A @ x.h, y.h)
 
-def test_projective_transformation_rejects_low_rank():
+def test_projective_Homography_rejects_low_rank():
     # Rank < n+1 should raise
     A = np.array([[1., 0., 0.],
                   [0., 0., 0.],
                   [0., 0., 0.]])  # rank 1, n+1 would be 3
     with pytest.raises(ValueError):
-        _ = ProjectiveTransformation(A)
+        _ = Homography(A)
 
 def test_transformation_check_compatible_uses_space_identity():
     A = np.eye(3)  # P^2 -> P^2
@@ -157,6 +157,29 @@ def test_projective_hyperplane_equals_up_to_scale():
     assert H1.equals_up_to_scale(H2)
     assert not H1.equals_up_to_scale(H3)
 
+
+# ---------- ProjectivePointcloud --------------------------------------------------------
+def test_projective_pointcloud_access():
+    p0 = ProjectivePoint(np.array([1,2,1]))
+    p1 = ProjectivePoint(np.array([0,0,1]))
+    p2 = ProjectivePoint(np.array([2,6,2]))
+    point_list = [p0, p1, p2]
+    pointcloud = ProjectivePointcloud(point_list)
+    assert p0 == pointcloud[0]
+    assert p1 == pointcloud[1]
+    assert p2 == pointcloud[2]
+    
+def test_projective_pointcloud_removal():
+    p0 = ProjectivePoint(np.array([1,2,1]))
+    p1 = ProjectivePoint(np.array([0,0,1]))
+    p2 = ProjectivePoint(np.array([2,6,2]))
+    point_list = [p0, p1, p2]
+    pointcloud = ProjectivePointcloud(point_list)
+    popped = pointcloud.pop(1)
+    assert p1 == popped
+    assert p0 == pointcloud[0]
+    assert p2 == pointcloud[1]
+    
 
 # ---------- Incidence --------------------------------------------------------
 

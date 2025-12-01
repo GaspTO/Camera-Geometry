@@ -49,7 +49,21 @@ class EuclideanPoint(Element):
     @property
     def dim(self):
         return self._x.size
-
+    
+    def __sub__(self, other) -> np.ndarray:
+        """Subtract two Euclidean points, returning the vector difference as a numpy array.
+        """
+        if not isinstance(other, EuclideanPoint):
+            raise TypeError("Subtraction is only defined between EuclideanPoint instances")
+        if self.dim != other.dim:
+            raise ValueError("Points must have the same dimension for subtraction")
+        return self.x - other.x
+        
+    def __mul__(self, scalar):
+        if not isinstance(scalar, (int, float)):
+            raise TypeError("Can only multiply by a scalar (int or float)")
+        return EuclideanPoint(self.x * scalar)
+    
     def __eq__(self, other):
         if isinstance(other, EuclideanPoint):
             return np.array_equal(self.x, other.x)
@@ -86,3 +100,6 @@ class EuclideanTransformation(Transformation):
     
     def __str__(self):
         return str(self._matrix)
+    
+    def __repr__(self):
+        return f"EuclideanTransformation(matrix={self._matrix!r})"

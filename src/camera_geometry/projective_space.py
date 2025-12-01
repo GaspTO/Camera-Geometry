@@ -39,15 +39,17 @@ class ProjectivePoint(Element):
     """
     A point in P^n represented by a nonzero homogeneous vector h ∈ R^{n+1},
     defined up to nonzero scalar multiples.
+    The content is an optional associated object.
     """       
-    def __init__(self, hvec: np.ndarray):
+    def __init__(self, hvec: np.ndarray, content: object = None):
         h = np.asarray(hvec, dtype=float)
         if h.ndim != 1:
             raise ValueError("homogeneous vector must be 1D")
         if h.size == 0 or np.allclose(h, 0):
             raise ValueError("homogeneous vector must be nonzero")
         self._h = h
-        super().__init__(ProjectiveSpace(h.size - 1))  # internal tag for compatibility
+        
+        super().__init__(ProjectiveSpace(h.size - 1), content)  # internal tag for compatibility
 
     # Accessors
     @property
@@ -93,6 +95,9 @@ class ProjectivePoint(Element):
     def __repr__(self) -> str:
         return f"ProjectivePoint(h={self._h!r}, space=P^{self.space.dim})"
     
+    def __iter__(self):
+        return iter(self._h)
+    
     
 class ProjectiveTransformation(Transformation):
     """
@@ -102,15 +107,11 @@ class ProjectiveTransformation(Transformation):
     def __init__(self, A: np.ndarray):
         if not isinstance(A, np.ndarray) or A.ndim != 2:
             raise ValueError("A must be a 2D numpy array")
-        m1, n1 = A.shape  # (m+1, n+1)
-        if m1 <= 0 or n1 <= 0:
-            raise ValueError("A must have shape (m+1, n+1) with m,n >= 0")
-        if np.linalg.matrix_rank(A) != n1:
-            raise ValueError("A must have full column rank (rank = n+1)")
-        
+        self._m = A.shape[0]-1  # codomain: P^m
+        self._n = A.shape[1]-1  # domain: P^n
+        if self._m <= 0 or self._n <= 0:
+            raise ValueError("A must have shape (m+1, n+1) with m,n >= 0")        
         self._A = A
-        self._m = m1 - 1  # codomain: P^m
-        self._n = n1 - 1  # domain:   P^n
         super().__init__(ProjectiveSpace(self._n), ProjectiveSpace(self._m))
         
     @property
@@ -255,6 +256,135 @@ class ProjectiveHyperplane(Element):
         return f"ProjectiveHyperplane(a={self._a!r}, space=(P^{self.space.dim})*)"
 
 
+class ProjectivePointcloud(Element):
+    def __init__(self, points: Iterable[ProjectivePoint]=None, space: Space=None, check_points=True):
+        if len(points) == 0:
+            points = None
+        if points is not None and space is not None:
+            raise ValueError("Only pass the space as argument if the list of points is empty (or None)")
+        elif points is not None:
+            self._points = points
+            self._dim = self._points[0].dim
+            space = self._points[0].space
+            if check_points:
+                for p in self._points:
+                    if p.space != space:
+                        raise ValueError("The points in the list are expected to belong to the same space")
+        else:
+            self._points = []
+            if not isinstance(space, Space):
+                raise TypeError("Space is expected to be of type Space")
+        super().__init__(space=space)
+
+    def transform(self, transformation: Transformation):
+        dim_out, dim_in = transformation.dim
+        if dim_in != self._dim:
+            raise ValueError(f"Transformation's dimensions ({dim_in}) are incompatible with that of the pointcloud {self._dim}")
+        for i, point in enumerate(self._points):
+            self._points[i] = transformation(point)
+        self._dim = dim_out # new pointcloud space dimension
+        
+    def add(self, point: ProjectivePoint):
+        if not isinstance(point, ProjectivePoint):
+            raise ValueError("point is expected to be of type ProjectivePoint")
+        if point.space != self.space:
+            raise ValueError(f"point is expected to belong to the same space as the pointcloud")
+        self._points.append(point)
+        
+    def pop(self, i: int):
+        if i >= len(self._points):
+            raise ValueError(f"index i is required to be smaller than the length of the pointcloud {len(self._points)}")
+        return self._points.pop(i)
+    
+    @property
+    def points(self):
+        return self._points
+    
+    @property
+    def dim(self) -> int:
+        return self.space.dim
+    
+    @staticmethod
+    def from_ply(file: str):
+        """
+        Returns a pointcloud from a ply pointcloud file.
+
+        Currently assumes:
+          - ASCII PLY
+          - a single 'vertex' element with at least x, y, z as the first 3 properties
+        """
+        points: list[ProjectivePoint] = []
+        vertex_count: int | None = None
+        mean = np.zeros(3)
+
+        with open(file, "r") as fp:
+            # Read header
+            line = fp.readline()
+            if not line.startswith("ply"):
+                raise ValueError("Not a PLY file (missing 'ply' magic)")
+
+            while True:
+                line = fp.readline()
+                if not line:
+                    raise ValueError("Unexpected EOF while reading PLY header")
+
+                line_stripped = line.strip()
+
+                # Capture vertex count from element line
+                # e.g. "element vertex 100000"
+                if line_stripped.startswith("element vertex"):
+                    parts = line_stripped.split()
+                    if len(parts) != 3:
+                        raise ValueError(f"Malformed 'element vertex' line: {line_stripped!r}")
+                    try:
+                        vertex_count = int(parts[2])
+                    except ValueError as e:
+                        raise ValueError(f"Invalid vertex count in PLY header: {line_stripped!r}") from e
+
+                if line_stripped == "end_header":
+                    break
+
+            # Now read vertex_count lines (if we know it), or until EOF
+            if vertex_count is None:
+                # Fallback: read until EOF
+                for line in fp:
+                    splitted = line.split()
+                    if not splitted:
+                        continue
+                    vec = np.array(splitted[0:3] + [1]).astype(float)
+                    point = ProjectivePoint(vec)
+                    points.append(point)
+            else:
+                for _ in range(vertex_count):
+                    line = fp.readline()
+                    if not line:
+                        break
+                    splitted = line.split()
+                    if not splitted:
+                        continue
+                    vec = np.array(splitted[0:3] + [1]).astype(float)
+                    mean += vec[0:3]
+                    point = ProjectivePoint(vec)
+                    points.append(point)
+
+        mean /= len(points) if points else 1
+        print(f"Mean of points: {mean}")
+
+        return ProjectivePointcloud(points=points)
+               
+    def __len__(self):
+        return len(self._points)
+    
+    def __iter__(self):
+        return iter(self._points)
+    
+    def __getitem__(self, i):
+        return self._points[i]
+    
+    def __repr__(self) -> str:
+        return f"ProjectivePointcloud(size={len(self._points)}, space=P^{self.space.dim})"
+    
+    
 # ----- Operations ----- #
 def incidence(p: ProjectivePoint, H: ProjectiveHyperplane, *, tol: float = 1e-12) -> bool:
     """
