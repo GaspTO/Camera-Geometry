@@ -74,6 +74,12 @@ class ProjectivePoint(Element):
         if np.isclose(den, 0.0, atol=atol):
             raise ValueError(f"h[{idx}] ≈ 0; not in this chart")
         return self._h / den
+    
+    @property
+    def x(self) -> np.ndarray:
+        """Dehomogenized coordinates (n,). Equivalent to h_coord(-1)[0:n]."""
+        h_coord = self.h_coord(-1)
+        return h_coord[0 : h_coord.size - 1]
        
     @property
     def dim(self) -> int:
@@ -296,6 +302,17 @@ class ProjectivePointcloud(Element):
             raise ValueError(f"index i is required to be smaller than the length of the pointcloud {len(self._points)}")
         return self._points.pop(i)
     
+    @property
+    def mat(self) -> np.ndarray:
+        """
+        Homogeneous coordinates of all points as an array of shape (n+1, N),
+        where each column is the homogeneous vector of a point.
+        """
+        if not self._points:
+            n1 = self.space.dim + 1
+            return np.zeros((n1, 0), dtype=float)
+        return np.stack([p.h for p in self._points], axis=1) # points stored in cols
+
     @property
     def points(self):
         return self._points

@@ -58,7 +58,16 @@ class EuclideanPoint(Element):
         if self.dim != other.dim:
             raise ValueError("Points must have the same dimension for subtraction")
         return self.x - other.x
-        
+    
+    def __add__(self, displacement: np.ndarray):
+        """Add a displacement vector (numpy array) to this Euclidean point, returning a new EuclideanPoint.
+        """
+        if not isinstance(displacement, np.ndarray):
+            raise TypeError("Displacement must be a numpy array")
+        if displacement.ndim != 1 or displacement.size != self.dim:
+            raise ValueError("Displacement must be a 1D numpy array of the same dimension as the point")
+        return EuclideanPoint(self.x + displacement)
+    
     def __mul__(self, scalar):
         if not isinstance(scalar, (int, float)):
             raise TypeError("Can only multiply by a scalar (int or float)")
