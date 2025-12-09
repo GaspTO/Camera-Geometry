@@ -191,7 +191,7 @@ class PinholeCamera:
         dir_vector = dir_vector / dir_norm
 
         # Right vector: up × forward
-        right_vector = np.cross(up_vector, dir_vector)
+        right_vector = np.cross(up_vector, dir_vector) 
         right_norm = np.linalg.norm(right_vector)
         if right_norm == 0:
             raise ValueError("look_at: 'up' vector is parallel to view direction.")
@@ -207,6 +207,11 @@ class PinholeCamera:
             right=right_vector,
         )
         self.set_orientation(EuclideanTransformation(R_new))
+    
+    def get_intrinsics(self) -> ProjectiveTransformation:
+        """ Returns the camera intrinsics as a ProjectiveTransformation.
+        """
+        return self._intrinsics
     
     @staticmethod
     def from_xy_to_uv(x, y, height, width):

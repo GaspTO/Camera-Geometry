@@ -332,7 +332,6 @@ class ProjectivePointcloud(Element):
         """
         points: list[ProjectivePoint] = []
         vertex_count: int | None = None
-        mean = np.zeros(3)
 
         with open(file, "r") as fp:
             # Read header
@@ -380,13 +379,9 @@ class ProjectivePointcloud(Element):
                     if not splitted:
                         continue
                     vec = np.array(splitted[0:3] + [1]).astype(float)
-                    mean += vec[0:3]
                     point = ProjectivePoint(vec)
                     points.append(point)
-
-        mean /= len(points) if points else 1
-        print(f"Mean of points: {mean}")
-
+                    
         return ProjectivePointcloud(points=points)
                
     def __len__(self):
