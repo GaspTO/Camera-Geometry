@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from typing import Iterable
 
 class Space(ABC):
     def contains(self, x) -> bool:
@@ -59,3 +60,55 @@ class Composition(Transformation):
     def __repr__(self):
         return f"Composition({repr(self.t1)}, {repr(self.t2)})"
     
+class ElementPointcloud(Element):
+    """Generic pointcloud of Elements sharing the same Space."""
+    def __init__(self, points: Iterable[Element] | None = None, space: Space = None, check_points: bool = True):
+        pts = [] if points is None else list(points)
+        if pts and space is not None:
+            raise ValueError("Only pass space when initializing an empty pointcloud.")
+        if pts:
+            space = pts[0].space
+            if check_points:
+                for p in pts:
+                    if p.space is not space:
+                        raise ValueError("All points must belong to the same space.")
+        else:
+            if not isinstance(space, Space):
+                raise TypeError("space must be provided for an empty pointcloud.")
+        self._points = pts
+        super().__init__(space=space)
+
+    def transform(self, transformation: Transformation):
+        for p in self._points:
+            transformation.check_compatible(p)
+        new_points = [transformation(p) for p in self._points]
+        target_space = transformation.codomain_space
+        for p in new_points:
+            if p.space is not target_space:
+                raise TypeError("Transformed point does not belong to the transformation codomain.")
+        self._points = new_points
+        self.space = target_space
+
+    def add(self, point: Element):
+        if not isinstance(point, Element):
+            raise ValueError("point must be an Element.")
+        if point.space is not self.space:
+            raise ValueError("point must belong to the same space as the pointcloud.")
+        self._points.append(point)
+
+    def pop(self, i: int):
+        if i >= len(self._points):
+            raise ValueError("index out of range for pointcloud.")
+        return self._points.pop(i)
+
+    def __len__(self):
+        return len(self._points)
+
+    def __iter__(self):
+        return iter(self._points)
+
+    def __getitem__(self, i):
+        return self._points[i]
+
+    def __repr__(self) -> str:
+        return f"ElementPointcloud(size={len(self._points)}, space={id(self.space)})"

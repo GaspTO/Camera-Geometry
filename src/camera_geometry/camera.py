@@ -1,5 +1,5 @@
-from camera_geometry.projective_space import ProjectivePoint, ProjectiveTransformation, ProjectiveSpace, ProjectivePointcloud
-from camera_geometry.euclidean_space import EuclideanPoint, EuclideanTransformation
+from camera_geometry.projective_space import ProjectivePoint, ProjectiveTransformation
+from camera_geometry.euclidean_space import EuclideanPoint, EuclideanTransformation, EuclideanPointcloud
 from camera_geometry.space import Composition
 import numpy as np
 from itertools import compress
@@ -65,7 +65,7 @@ class PinholeCamera:
         self.update_camera_matrix()
   
     def __call__(self,
-                 pointcloud: ProjectivePointcloud,
+                 pointcloud: EuclideanPointcloud,
                  height=None,
                  width=None,
                  background=None,
@@ -73,9 +73,12 @@ class PinholeCamera:
                  batch_size= 1) -> np.array:
         """ Projects a 3D pointcloud into a 2D image plane.
         Args:
-            pointcloud: ProjectivePointcloud in P^3 (3D points)
+            pointcloud: EuclideanPointcloud in R^3 (3D points)
             height: image height in pixels (overrides camera default if given)
             width: image width in pixels (overrides camera default if given)
+            background: value to fill background pixels
+            foreground: value to fill foreground pixels (if None, use point objects)
+            batch_size: number of points to process per batch
         Returns:
             2D image as a numpy array of shape (height, width).
         """
@@ -87,7 +90,12 @@ class PinholeCamera:
             raise ValueError("Height and width must be specified either at camera creation or call time.")
 
         batch_num = len(pointcloud) // batch_size + (len(pointcloud) % batch_size > 0)
-        pointcloud_mat = pointcloud.mat  # shape (4, N)
+        
+        # Handle both EuclideanPointcloud and ProjectivePointcloud
+        pointcloud_mat_raw = pointcloud.mat  # shape (3, N)
+        # Convert to homogeneous vectors (4, N)
+        pointcloud_mat = np.vstack((pointcloud_mat_raw,
+                                    np.ones((1, pointcloud_mat_raw.shape[1])))) 
 
         image = np.full((height,width), dtype=object, fill_value=background)
         z_values = np.full((height,width), np.inf)
@@ -102,7 +110,7 @@ class PinholeCamera:
             
             # conditions
             in_bounds = (U >= 0) & (U < width) & (V >= 0) & (V < height)
-            valid_depth = Depth > 0 # Convert to (u,v) coordinates
+            valid_depth = Depth > 0
             idxs = in_bounds & valid_depth
             closer = np.zeros_like(idxs, dtype=bool)
             closer[idxs] = z_values[V[idxs], U[idxs]] > Depth[idxs] # Points closer to the camera than current z-buffer
@@ -115,7 +123,7 @@ class PinholeCamera:
                 current_slice = pointcloud.points[start_idx:end_idx]
                 valid_points = list(compress(current_slice, mask))
                 image[V[mask], U[mask]] = valid_points
-        return image     
+        return image
 
     
     def update_camera_matrix(self) -> None:

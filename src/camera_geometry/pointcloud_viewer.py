@@ -2,8 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from camera_geometry.camera import PinholeCamera
-from camera_geometry.euclidean_space import EuclideanPoint
-from camera_geometry.projective_space import ProjectivePointcloud
+from camera_geometry.euclidean_space import EuclideanPoint, EuclideanPointcloud
 from camera_geometry.vector_ops import multiply_quaternions, rotate_vector_by_quaternion
 
 
@@ -45,7 +44,7 @@ class PointcloudViewer:
         self.camera = PinholeCamera(fx, fy, width / 2, height / 2, debug=debug)
         
         # Load pointcloud
-        self.pointcloud = ProjectivePointcloud.from_ply(ply_path)
+        self.pointcloud = EuclideanPointcloud.from_ply(ply_path)
         if debug:
             print(f"Loaded pointcloud with {len(self.pointcloud.points)} points from {ply_path}")
             

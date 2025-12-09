@@ -1,4 +1,5 @@
-from .space import Space, Transformation, Element
+from typing import Iterable
+from .space import Space, Transformation, Element, ElementPointcloud
 import numpy as np
 
 
@@ -112,3 +113,124 @@ class EuclideanTransformation(Transformation):
     
     def __repr__(self):
         return f"EuclideanTransformation(matrix={self._matrix!r})"
+    
+
+class EuclideanPointcloud(ElementPointcloud):
+    def __init__(self, points: Iterable[EuclideanPoint]=None, space: Space=None, check_points=True):
+        if points is not None and len(points) == 0:
+            points = None
+        super().__init__(points=points, space=space, check_points=check_points)
+        self._dim = self.space.dim
+
+    def transform(self, transformation: Transformation):
+        dim_out, dim_in = transformation.dim
+        if dim_in != self._dim:
+            raise ValueError(f"Transformation's dimensions ({dim_in}) are incompatible with that of the pointcloud {self._dim}")
+        super().transform(transformation)
+        self._dim = dim_out
+
+    def add(self, point: EuclideanPoint):
+        if not isinstance(point, EuclideanPoint):
+            raise ValueError("point is expected to be of type EuclideanPoint")
+        if point.space != self.space:
+            raise ValueError(f"point is expected to belong to the same space as the pointcloud")
+        super().add(point)
+
+    def pop(self, i: int):
+        if i >= len(self._points):
+            raise ValueError(f"index i is required to be smaller than the length of the pointcloud {len(self._points)}")
+        return super().pop(i)
+    
+    @property
+    def mat(self) -> np.ndarray:
+        """
+        Euclidean Coordinates of all points as an array of shape (n, N),
+        where each column is the Euclidean vector of a point.
+        """
+        if not self._points:
+            n1 = self.space.dim
+            return np.zeros((n1, 0), dtype=float)
+        return np.stack([p.x for p in self._points], axis=1) # points stored in cols
+
+    @property
+    def points(self):
+        return self._points
+    
+    @property
+    def dim(self) -> int:
+        return self.space.dim
+    
+    @staticmethod
+    def from_ply(file: str):
+        """
+        Returns a pointcloud from a ply pointcloud file.
+
+        Currently assumes:
+          - ASCII PLY
+          - a single 'vertex' element with at least x, y, z as the first 3 properties
+        """
+        points: list[EuclideanPoint] = []
+        vertex_count: int | None = None
+
+        with open(file, "r") as fp:
+            # Read header
+            line = fp.readline()
+            if not line.startswith("ply"):
+                raise ValueError("Not a PLY file (missing 'ply' magic)")
+
+            while True:
+                line = fp.readline()
+                if not line:
+                    raise ValueError("Unexpected EOF while reading PLY header")
+
+                line_stripped = line.strip()
+
+                # Capture vertex count from element line
+                # e.g. "element vertex 100000"
+                if line_stripped.startswith("element vertex"):
+                    parts = line_stripped.split()
+                    if len(parts) != 3:
+                        raise ValueError(f"Malformed 'element vertex' line: {line_stripped!r}")
+                    try:
+                        vertex_count = int(parts[2])
+                    except ValueError as e:
+                        raise ValueError(f"Invalid vertex count in PLY header: {line_stripped!r}") from e
+
+                if line_stripped == "end_header":
+                    break
+
+            # Now read vertex_count lines (if we know it), or until EOF
+            if vertex_count is None:
+                # Fallback: read until EOF
+                for line in fp:
+                    splitted = line.split()
+                    if not splitted:
+                        continue
+                    vec = np.array(splitted[0:3]).astype(float)
+                    point = EuclideanPoint(vec)
+                    points.append(point)
+            else:
+                for _ in range(vertex_count):
+                    line = fp.readline()
+                    if not line:
+                        break
+                    splitted = line.split()
+                    if not splitted:
+                        continue
+                    vec = np.array(splitted[0:3]).astype(float)
+                    point = EuclideanPoint(vec)
+                    points.append(point)
+                    
+        return EuclideanPointcloud(points=points)
+               
+    def __len__(self):
+        return len(self._points)
+    
+    def __iter__(self):
+        return iter(self._points)
+    
+    def __getitem__(self, i):
+        return self._points[i]
+    
+    def __repr__(self) -> str:
+        return f"EuclideanPointcloud(size={len(self._points)}, space=E^{self.space.dim})"
