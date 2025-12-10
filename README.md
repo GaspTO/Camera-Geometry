@@ -68,8 +68,12 @@ warped = warper(img, background=0)
 ```
 
 ## Pointcloud viewer
+```python
 viewer = PointcloudViewer("pointcloud_file.ply")
 viewer.show()
+```
+
+![Pointcloud dragon demo](assets/dragon.gif)
 
 Controls:
 - Arrows: translate camera in the image plane
