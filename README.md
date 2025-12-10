@@ -73,7 +73,7 @@ viewer = PointcloudViewer("pointcloud_file.ply")
 viewer.show()
 ```
 
-![Pointcloud dragon demo](assets/dragon.gif)
+![Pointcloud dragon demo](assets/dragon_pointcloud_viewer.gif)
 
 Controls:
 - Arrows: translate camera in the image plane
